@@ -905,6 +905,73 @@ export async function getBookingImpactForAssetKits({
 }
 
 /**
+ * Which of a kit's live bookings have the kit itself checked out right now.
+ *
+ * A booking's own status (`ONGOING`/`OVERDUE`) cannot answer that: progressive
+ * checkout flips a booking to `ONGOING` on the first scan of anything, and
+ * `Kit.status` can remain `CHECKED_OUT` after the booking finishes (#2971).
+ * A booking qualifies only when this kit has at least one prior slice on it,
+ * every prior slice was checked out (`checkedOutAt !== null`), and at least one
+ * prior slice has not been checked in yet (`checkedInAt === null`).
+ *
+ * Shared between `updateKitAssets` (which stamps newly added members
+ * `CHECKED_OUT`) and {@link willKitPropagateCheckout} (used by the "Add assets"
+ * picker loader, #2972) so the confirmation dialog only promises status
+ * inheritance when the write path will actually perform it.
+ */
+export function getEligibleCheckedOutBookingIds(
+  priorSlices: {
+    bookingId: string;
+    checkedOutAt: Date | null;
+    checkedInAt: Date | null;
+  }[],
+  liveBookingIds?: string[]
+): string[] {
+  const bookingIds =
+    liveBookingIds ?? [...new Set(priorSlices.map((s) => s.bookingId))];
+  return bookingIds.filter((bookingId) => {
+    const slices = priorSlices.filter((s) => s.bookingId === bookingId);
+    if (slices.length === 0) return false;
+    if (slices.some((s) => !s.checkedOutAt)) return false;
+    return slices.some((s) => !s.checkedInAt);
+  });
+}
+
+/**
+ * Whether adding an asset to this kit right now will stamp the new member
+ * `CHECKED_OUT` (#2969, #2972).
+ *
+ * Evaluates {@link getEligibleCheckedOutBookingIds} against the kit's current
+ * `AssetKit` memberships on `ONGOING`/`OVERDUE` bookings in `organizationId`.
+ */
+export async function willKitPropagateCheckout({
+  assetKitIds,
+  organizationId,
+}: {
+  assetKitIds: string[];
+  organizationId: string;
+}): Promise<boolean> {
+  if (assetKitIds.length === 0) return false;
+
+  const priorSlices = await db.bookingAsset.findMany({
+    where: {
+      assetKitId: { in: assetKitIds },
+      booking: {
+        organizationId,
+        status: { in: [BookingStatus.ONGOING, BookingStatus.OVERDUE] },
+      },
+    },
+    select: {
+      bookingId: true,
+      checkedOutAt: true,
+      checkedInAt: true,
+    },
+  });
+
+  return getEligibleCheckedOutBookingIds(priorSlices).length > 0;
+}
+
+/**
  * Companion to {@link fetchAssetKitDetachmentImpact}. Writes a system
  * note on each affected booking explaining that the kit's booked slice
  * has been converted to a standalone reservation. The kit-driven
@@ -7536,14 +7603,10 @@ export async function updateKitAssets({
              * additions inherit that status. Refusing there would be stricter
              * than the behaviour this replaces.
              */
-            const eligibleBookingIds = liveBookingIds.filter((bookingId) => {
-              const slices = priorSlices.filter(
-                (s) => s.bookingId === bookingId
-              );
-              if (slices.length === 0) return false;
-              if (slices.some((s) => !s.checkedOutAt)) return false;
-              return slices.some((s) => !s.checkedInAt);
-            });
+            const eligibleBookingIds = getEligibleCheckedOutBookingIds(
+              priorSlices,
+              liveBookingIds
+            );
 
             if (eligibleBookingIds.length > 0) {
               /**

@@ -62,6 +62,7 @@ import { getKitPickerMeta } from "~/modules/kit/picker-meta.server";
 import {
   getBookingImpactForAssetKits,
   updateKitAssets,
+  willKitPropagateCheckout,
 } from "~/modules/kit/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { AssetQuantitiesSchema } from "~/utils/asset-quantities-schema";
@@ -196,16 +197,24 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     // so before it happens. Bounded by the kit's size — not the asset index
     // page — and resolved in the loader so opening the dialog costs no
     // round-trip.
-    const [pickerMetaByAssetId, bookingImpactByAssetKitId] = await Promise.all([
+    const assetKitIds = kit.assetKits.map((ak) => ak.id);
+    const [
+      pickerMetaByAssetId,
+      bookingImpactByAssetKitId,
+      willInheritCheckedOutStatus,
+    ] = await Promise.all([
       getKitPickerMeta({
         kitId,
         organizationId,
         assetIds: assets.map((a) => a.id),
       }),
       getBookingImpactForAssetKits({
-        assetKitIds: kit.assetKits.map((ak) => ak.id),
+        assetKitIds,
         organizationId,
       }),
+      kit.status === KitStatus.CHECKED_OUT
+        ? willKitPropagateCheckout({ assetKitIds, organizationId })
+        : Promise.resolve(false),
     ]);
 
     /** `assetId -> impact of removing it from THIS kit`. Impact-free members
@@ -242,6 +251,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       showSidebar: true,
       noScroll: true,
       kit,
+      willInheritCheckedOutStatus,
       bookingImpactByAssetId,
       items: itemsWithPickerMeta,
       totalItems: totalAssets,
@@ -309,8 +319,13 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
 const REMOVAL_NOTICE_ID = "manage-kit-assets-removal-notice";
 
 export default function ManageAssetsInKit() {
-  const { kit, items, totalItems, bookingImpactByAssetId } =
-    useLoaderData<LoaderData>();
+  const {
+    kit,
+    willInheritCheckedOutStatus,
+    items,
+    totalItems,
+    bookingImpactByAssetId,
+  } = useLoaderData<LoaderData>();
   // why: `.map` returns a new array each render. The disabled-items effect
   // below depends on `kitAssetIds`, so an unmemoised list would re-run it on
   // every render, and its `setDisabledBulkItems` write would loop.
@@ -430,6 +445,9 @@ export default function ManageAssetsInKit() {
 
   const kitIsInCustody =
     kit.status === KitStatus.IN_CUSTODY || kit.status === KitStatus.CHECKED_OUT;
+  const willInheritKitStatus =
+    kit.status === KitStatus.IN_CUSTODY ||
+    (kit.status === KitStatus.CHECKED_OUT && willInheritCheckedOutStatus);
   const showInCustodyQtyWarning =
     kitIsInCustody && qtyEditedInExistingKitRows.length > 0;
 
@@ -678,7 +696,7 @@ export default function ManageAssetsInKit() {
                 </div>
 
                 <div>
-                  {kitIsInCustody && (
+                  {willInheritKitStatus && (
                     <p className="mb-3">
                       This kit is currently{" "}
                       {kit.status === KitStatus.IN_CUSTODY
