@@ -12,6 +12,7 @@ import { parseMobileBody } from "~/modules/api/mobile-body.server";
 import { deleteBooking } from "~/modules/booking/service.server";
 import { assertCanDeleteBooking } from "~/utils/booking-authorization.server";
 import { getClientHint } from "~/utils/client-hints";
+import { assertDeleteConfirmed } from "~/utils/delete-confirmation.server";
 import { makeShelfError } from "~/utils/error";
 import {
   PermissionAction,
@@ -31,13 +32,16 @@ import { enforceUserRateLimit } from "~/utils/rate-limit.server";
  * runs: ownership for callers who do not write every booking, and drafts only
  * for roles whose policy says so.
  *
- * Body: { bookingId: string }
+ * Body: { bookingId: string, confirmation?: string }
  * Query: ?orgId=...
  *
  * @see {@link file://../../_layout+/bookings.$bookingId.overview.tsx} web twin (delete intent)
  */
 
-const BodySchema = z.object({ bookingId: z.string().min(1) });
+const BodySchema = z.object({
+  bookingId: z.string().min(1),
+  confirmation: z.string().optional(),
+});
 
 export async function action({ request }: ActionFunctionArgs) {
   let userId: string | undefined;
@@ -58,7 +62,11 @@ export async function action({ request }: ActionFunctionArgs) {
 
     await assertMobileCanUseBookings(organizationId);
 
-    const { bookingId } = await parseMobileBody(BodySchema, request, "Booking");
+    const { bookingId, confirmation } = await parseMobileBody(
+      BodySchema,
+      request,
+      "Booking"
+    );
 
     const { access } = await getMobileUserContext(user.id, organizationId);
 
@@ -66,6 +74,7 @@ export async function action({ request }: ActionFunctionArgs) {
       where: { id: bookingId, organizationId },
       select: {
         id: true,
+        name: true,
         creatorId: true,
         custodianUserId: true,
         status: true,
@@ -80,6 +89,12 @@ export async function action({ request }: ActionFunctionArgs) {
     }
 
     assertCanDeleteBooking({ access, booking, userId: user.id });
+
+    assertDeleteConfirmed({
+      confirmation,
+      expected: booking.name,
+      label: "Booking",
+    });
 
     await deleteBooking(
       { id: bookingId, organizationId },

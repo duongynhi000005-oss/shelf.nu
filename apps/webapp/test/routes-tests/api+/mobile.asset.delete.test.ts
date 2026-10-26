@@ -34,6 +34,7 @@ vi.mock("~/modules/api/mobile-auth.server", () => ({
 
 // why: external service — we don't want to hit the real database when deleting assets
 vi.mock("~/modules/asset/service.server", () => ({
+  assertAssetDeleteConfirmed: vi.fn(),
   deleteAsset: vi.fn(),
 }));
 
@@ -57,7 +58,11 @@ import {
   requireOrganizationAccess,
   requireMobilePermission,
 } from "~/modules/api/mobile-auth.server";
-import { deleteAsset } from "~/modules/asset/service.server";
+import {
+  assertAssetDeleteConfirmed,
+  deleteAsset,
+} from "~/modules/asset/service.server";
+import { ShelfError } from "~/utils/error";
 
 const mockUser = {
   id: "user-1",
@@ -87,17 +92,24 @@ describe("POST /api/mobile/asset/delete", () => {
     });
     (requireOrganizationAccess as any).mockResolvedValue("org-1");
     (requireMobilePermission as any).mockResolvedValue(undefined);
+    (assertAssetDeleteConfirmed as any).mockResolvedValue(undefined);
   });
 
   it("should delete an asset and return success", async () => {
     (deleteAsset as any).mockResolvedValue(undefined);
 
-    const request = createRequest({ assetId: "asset-1" });
+    const request = createRequest({ assetId: "asset-1", confirmation: "Camera" });
     const result = await action(createActionArgs({ request }));
 
     expect(result instanceof Response).toBe(true);
     const body = await (result as unknown as Response).json();
     expect(body.success).toBe(true);
+
+    expect(assertAssetDeleteConfirmed).toHaveBeenCalledWith({
+      id: "asset-1",
+      organizationId: "org-1",
+      confirmation: "Camera",
+    });
 
     expect(deleteAsset).toHaveBeenCalledWith({
       id: "asset-1",
@@ -106,6 +118,26 @@ describe("POST /api/mobile/asset/delete", () => {
       // the `ASSET_DELETED` activity event to the user who triggered it.
       actorUserId: "user-1",
     });
+  });
+
+  it("should return 400 and not delete when confirmation is missing or does not match", async () => {
+    (assertAssetDeleteConfirmed as any).mockRejectedValue(
+      new ShelfError({
+        message: 'Nothing was deleted. Type "Camera" to confirm.',
+        status: 400,
+      })
+    );
+
+    const request = createRequest({ assetId: "asset-1" });
+    const result = await action(createActionArgs({ request }));
+
+    expect(result instanceof Response).toBe(true);
+    expect((result as unknown as Response).status).toBe(400);
+    const body = await (result as unknown as Response).json();
+    expect(body.error.message).toBe(
+      'Nothing was deleted. Type "Camera" to confirm.'
+    );
+    expect(deleteAsset).not.toHaveBeenCalled();
   });
 
   it("should return 403 when permission is denied", async () => {

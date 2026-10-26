@@ -17,7 +17,7 @@ import {
 // why: no database in unit tests; the transaction callback runs against the
 // same stubs, and the raw file lookups go to the storage fake
 const dbMocks = vi.hoisted(() => ({
-  asset: { delete: vi.fn() },
+  asset: { findFirst: vi.fn(), delete: vi.fn() },
   $transaction: vi.fn(),
   $queryRaw: vi.fn(),
 }));
@@ -49,14 +49,14 @@ vi.mock("~/modules/activity-event/service.server", () => ({
 const { action } = await import("~/routes/api+/mobile+/asset.delete");
 const { Logger } = await import("~/utils/logger");
 
-/** Posts `{ assetId }` to the route as the phone app does. */
-async function deleteFromPhone(assetId: string) {
+/** Posts `{ assetId, confirmation }` to the route as the phone app does. */
+async function deleteFromPhone(assetId: string, confirmation = "Camera") {
   const request = new Request(
     "http://localhost/api/mobile/asset/delete?orgId=org-1",
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ assetId }),
+      body: JSON.stringify({ assetId, confirmation }),
     }
   );
   const result = await action({ request, params: {}, context: {} } as never);
@@ -79,6 +79,7 @@ beforeEach(() => {
   dbMocks.$transaction.mockImplementation(
     (cb: (tx: typeof dbMocks) => Promise<unknown>) => cb(dbMocks)
   );
+  dbMocks.asset.findFirst.mockResolvedValue({ title: "Camera" });
   dbMocks.asset.delete.mockResolvedValue({ reminders: [] });
 });
 

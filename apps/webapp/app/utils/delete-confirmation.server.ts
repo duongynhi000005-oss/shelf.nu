@@ -90,8 +90,7 @@ export function assertBulkDeleteConfirmed({
  *
  * Called with the item's current name, through {@link assertDeleteConfirmedFor}
  * by the module services, and directly by the admin user delete (an account's
- * email). The mobile delete endpoints do not call it yet: installed phone apps
- * that predate the typed sheet post no confirmation (see #3175).
+ * email) and mobile booking delete.
  *
  * @param params.confirmation - What the user typed, from the `confirmation` field
  * @param params.expected - The item's current name, as the dialog showed it

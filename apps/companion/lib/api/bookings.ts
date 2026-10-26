@@ -392,7 +392,7 @@ export const bookingsApi = {
   /**
    * Permanently delete a booking (ownership + BASE-only-DRAFT enforced
    * server-side). `confirmation` is the name the user typed in the delete
-   * sheet; the server checks it once every supported build sends it (#3175).
+   * sheet, verified server-side against the booking's current name.
    */
   deleteBooking: (orgId: string, bookingId: string, confirmation: string) =>
     apiFetch<{ success: boolean }>(

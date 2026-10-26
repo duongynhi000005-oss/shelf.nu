@@ -149,7 +149,7 @@ export const assetMutationsApi = {
 
   /**
    * Delete an asset. `confirmation` is the title the user typed in the delete
-   * sheet; the server checks it once every supported build sends it (#3175).
+   * sheet, verified server-side against the asset's current title.
    */
   deleteAsset: (orgId: string, assetId: string, confirmation: string) =>
     apiFetch<DeleteAssetResponse>(`/api/mobile/asset/delete?orgId=${orgId}`, {

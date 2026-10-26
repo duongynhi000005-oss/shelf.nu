@@ -49,8 +49,8 @@ import { action } from "~/routes/api+/mobile+/bookings.delete";
 
 // @vitest-environment node
 
-/** POSTs `{ bookingId: "booking-1" }` to the endpoint as user-1 in org-1. */
-function post() {
+/** POSTs `{ bookingId: "booking-1", confirmation }` to the endpoint as user-1 in org-1. */
+function post(confirmation: string | undefined = "Trip") {
   return action({
     request: new Request(
       "http://localhost/api/mobile/bookings/delete?orgId=org-1",
@@ -60,7 +60,10 @@ function post() {
           "Content-Type": "application/json",
           Authorization: "Bearer t",
         },
-        body: JSON.stringify({ bookingId: "booking-1" }),
+        body: JSON.stringify({
+          bookingId: "booking-1",
+          ...(confirmation !== undefined ? { confirmation } : {}),
+        }),
       }
     ),
     params: {},
@@ -80,6 +83,7 @@ describe("POST /api/mobile/bookings/delete: ownership and status", () => {
     );
     vi.mocked(db.booking.findFirst).mockResolvedValue({
       id: "booking-1",
+      name: "Trip",
       creatorId: "user-1",
       custodianUserId: null,
       status: "RESERVED",
@@ -98,6 +102,7 @@ describe("POST /api/mobile/bookings/delete: ownership and status", () => {
     );
     vi.mocked(db.booking.findFirst).mockResolvedValue({
       id: "booking-1",
+      name: "Trip",
       creatorId: "someone-else",
       custodianUserId: "someone-else",
       status: "DRAFT",
@@ -115,6 +120,7 @@ describe("POST /api/mobile/bookings/delete: ownership and status", () => {
     );
     vi.mocked(db.booking.findFirst).mockResolvedValue({
       id: "booking-1",
+      name: "Trip",
       creatorId: "someone-else",
       custodianUserId: "someone-else",
       status: "ONGOING",
@@ -134,6 +140,7 @@ describe("POST /api/mobile/bookings/delete: ownership and status", () => {
     );
     vi.mocked(db.booking.findFirst).mockResolvedValue({
       id: "booking-1",
+      name: "Trip",
       creatorId: "user-1",
       custodianUserId: "user-1",
       status: "RESERVED",
@@ -151,6 +158,7 @@ describe("POST /api/mobile/bookings/delete: ownership and status", () => {
       );
       vi.mocked(db.booking.findFirst).mockResolvedValue({
         id: "booking-1",
+        name: "Trip",
         creatorId: "user-1",
         custodianUserId: null,
         status: "DRAFT",
@@ -164,4 +172,60 @@ describe("POST /api/mobile/bookings/delete: ownership and status", () => {
       });
     }
   );
+
+  it("refuses when confirmation is missing", async () => {
+    vi.mocked(getMobileUserContext).mockResolvedValue(
+      mobileUserContext({ roles: [OrganizationRoles.ADMIN] }) as never
+    );
+    vi.mocked(db.booking.findFirst).mockResolvedValue({
+      id: "booking-1",
+      name: "Trip",
+      creatorId: "user-1",
+      custodianUserId: null,
+      status: "DRAFT",
+    } as never);
+
+    const response = await post(undefined);
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({
+      error: { message: 'Nothing was deleted. Type "Trip" to confirm.' },
+    });
+    expect(deleteBooking).not.toHaveBeenCalled();
+  });
+
+  it("refuses when confirmation does not match the booking name", async () => {
+    vi.mocked(getMobileUserContext).mockResolvedValue(
+      mobileUserContext({ roles: [OrganizationRoles.ADMIN] }) as never
+    );
+    vi.mocked(db.booking.findFirst).mockResolvedValue({
+      id: "booking-1",
+      name: "Trip",
+      creatorId: "user-1",
+      custodianUserId: null,
+      status: "DRAFT",
+    } as never);
+
+    const response = await post("Wrong name");
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({
+      error: { message: 'Nothing was deleted. Type "Trip" to confirm.' },
+    });
+    expect(deleteBooking).not.toHaveBeenCalled();
+  });
+
+  it("accepts a case-insensitive confirmation matching the booking name", async () => {
+    vi.mocked(getMobileUserContext).mockResolvedValue(
+      mobileUserContext({ roles: [OrganizationRoles.ADMIN] }) as never
+    );
+    vi.mocked(db.booking.findFirst).mockResolvedValue({
+      id: "booking-1",
+      name: "Trip",
+      creatorId: "user-1",
+      custodianUserId: null,
+      status: "DRAFT",
+    } as never);
+
+    expect((await post("trip")).status).toBe(200);
+    expect(deleteBooking).toHaveBeenCalledTimes(1);
+  });
 });
